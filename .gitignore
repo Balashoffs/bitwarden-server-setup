@@ -1,0 +1,6 @@
+.env
+.env.local
+secrets/
+backups/
+*.log
+.last_known_good_digest
