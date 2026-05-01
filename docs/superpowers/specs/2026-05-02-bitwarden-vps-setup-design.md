@@ -476,6 +476,8 @@ sudo ./scripts/restore.sh /tmp/2026-04-30-0330.tar.gz.enc --yes-i-know
 
 This section resolves the open item at the end of Section 10. All names were verified directly from the `bitwarden/self-host` repository sources listed in the `Source` column. Section 10 is left intact as the historical record of what was unknown at design time.
 
+> **Note:** the unified image's source lives in `bitwarden-lite/` in the upstream repo (`github.com/bitwarden/self-host`), not `docker-unified/` (a different, heavier variant).
+
 **Source files consulted:**
 - `entrypoint.sh`: https://github.com/bitwarden/self-host/blob/main/bitwarden-lite/entrypoint.sh
 - `settings.env`: https://github.com/bitwarden/self-host/blob/main/bitwarden-lite/settings.env
@@ -486,44 +488,49 @@ This section resolves the open item at the end of Section 10. All names were ver
 
 | Function | Env var (exact) | Notes | Source |
 |---|---|---|---|
-| Domain (full hostname, no trailing slash) | `BW_DOMAIN` | Mapped by entrypoint to `globalSettings__baseServiceUri__vault=https://${BW_DOMAIN}`. Set to bare hostname e.g. `panda.hello-vanilla.ru` (not a full URL). | entrypoint.sh line 9 |
-| Database provider | `BW_DB_PROVIDER` | Values: `sqlite`, `mysql`, `postgresql`, `sqlserver`. Mapped to `globalSettings__databaseProvider`. | entrypoint.sh line 29; settings.env |
-| SQLite file path inside container | `BW_DB_FILE` | Default set in Dockerfile: `/etc/bitwarden/vault.db`. This default is used unless overridden. Mapped to connection string `Data Source=$BW_DB_FILE;`. | Dockerfile `ENV BW_DB_FILE="/etc/bitwarden/vault.db"`; entrypoint.sh line 13 |
+| Domain (full hostname, no trailing slash) | `BW_DOMAIN` | The entrypoint builds an intermediate variable first: `VAULT_SERVICE_URI=https://${BW_DOMAIN:-localhost}` (line 12), then exports `globalSettings__baseServiceUri__vault=${globalSettings__baseServiceUri__vault:-$VAULT_SERVICE_URI}` (line 21). Set to bare hostname e.g. `panda.hello-vanilla.ru` (not a full URL). | entrypoint.sh lines 12 and 21 |
+| Database provider | `BW_DB_PROVIDER` | Values: `sqlite`, `mysql`, `postgresql`, `sqlserver`. Mapped to `globalSettings__databaseProvider`. | entrypoint.sh line 28; settings.env |
+| SQLite file path inside container | `BW_DB_FILE` | Default set in Dockerfile: `/etc/bitwarden/vault.db`. This default is used unless overridden. Mapped to connection string `Data Source=$BW_DB_FILE;`. | Dockerfile line 40 (`ENV BW_DB_FILE="/etc/bitwarden/vault.db"`); entrypoint.sh line 16 |
 | Installation ID | `BW_INSTALLATION_ID` | Mapped to `globalSettings__installation__id`. | entrypoint.sh line 22 |
 | Installation key | `BW_INSTALLATION_KEY` | Mapped to `globalSettings__installation__key`. | entrypoint.sh line 23 |
 | Disable user registration | `globalSettings__disableUserRegistration` | **Direct `globalSettings__` variable — no short `BW_` alias exists.** Set to `false` (allow) or `true` (block). Default in settings.env is `false` (commented). | settings.env |
-| Internal HTTP port | `BW_PORT_HTTP` | Default: `8080`. This is the port nginx inside the container listens on when `BW_ENABLE_SSL` is not `true`. Compose should bind `127.0.0.1:${BW_BIND_PORT}:8080`. | entrypoint.sh line 38; nginx-config.hbs |
-| Healthcheck endpoint | `/alive` | nginx returns `200 OK` with GMT timestamp. No dedicated env var — path is hardcoded in nginx-config.hbs. Correct healthcheck: `curl -f http://localhost:8080/alive`. | nginx-config.hbs |
+| Internal HTTP port | `BW_PORT_HTTP` | Default: `8080`. This is the port nginx inside the container listens on when `BW_ENABLE_SSL` is not `true` (else branch: `export globalSettings__baseServiceUri__internalVault=http://localhost:${BW_PORT_HTTP:-8080}`). We leave `BW_ENABLE_SSL` unset (defaults to off), so the container listens on `BW_PORT_HTTP=8080` and the host nginx terminates TLS. Compose should bind `127.0.0.1:${BW_BIND_PORT}:8080`. | entrypoint.sh line 37; nginx-config.hbs |
+| Healthcheck endpoint | `/alive` | nginx returns `200 OK` with GMT timestamp. No dedicated env var — path is hardcoded in nginx-config.hbs (lines 69–72): `location /alive { default_type text/plain; return 200 $date_gmt; }`. Correct healthcheck: `curl -f http://localhost:8080/alive`. | nginx-config.hbs lines 69–72 |
 | Disable mail (SMTP) | `globalSettings__mail__smtp__host` + related | There is NO `BW_ENABLE_MAIL` or similar flag. Mail is effectively disabled by leaving all `globalSettings__mail__smtp__*` vars unset/absent. The relevant vars are: `globalSettings__mail__replyToEmail`, `globalSettings__mail__smtp__host`, `globalSettings__mail__smtp__port`, `globalSettings__mail__smtp__ssl`, `globalSettings__mail__smtp__username`, `globalSettings__mail__smtp__password`. | settings.env |
 
 ### 11.2 Corrections to the spec's current assumptions
 
 The following items in the existing spec (sections 4.1, 4.2, and 5.3) use incorrect names or paths and must be updated before downstream tasks write actual files:
 
-1. **`BW_DISABLE_USER_REGISTRATION` does not exist.** The spec's `.env.example` and `docker-compose.yml` use this as a proxy variable that maps to `globalSettings__disableUserRegistration`. The unified image has no such alias. Correct approach for downstream tasks: pass `globalSettings__disableUserRegistration` directly in the `environment:` block of `docker-compose.yml`, sourced from a `.env` variable named `BW_DISABLE_REGISTRATION` (or similar) for human convenience. Alternatively, set it directly without an intermediate `.env` variable since it only ever takes two values.
+1. **`BW_DISABLE_USER_REGISTRATION` does not exist.** The spec's `.env.example` and `docker-compose.yml` use this as a proxy variable that maps to `globalSettings__disableUserRegistration`. The unified image has no such alias. Correct approach for downstream tasks: pass `globalSettings__disableUserRegistration` directly in the `environment:` block of `docker-compose.yml`, sourced from a `.env` variable named `BW_DISABLE_REGISTRATION` for human convenience. Alternatively, set it directly without an intermediate `.env` variable since it only ever takes two values.
 
 2. **SQLite path is `/etc/bitwarden/vault.db`, not `/etc/bitwarden/data/db.sqlite`.** The Dockerfile sets `ENV BW_DB_FILE="/etc/bitwarden/vault.db"`. The spec's `backup.sh` section references `sqlite3 /etc/bitwarden/data/db.sqlite` — this path is wrong. Downstream tasks must use `/etc/bitwarden/vault.db`.
 
-3. **`BW_DOMAIN` expects bare hostname, not full HTTPS URL.** The entrypoint prepends `https://` itself: `VAULT_SERVICE_URI=https://${BW_DOMAIN:-localhost}`. Setting `BW_DOMAIN=https://panda.hello-vanilla.ru` would result in `https://https://panda.hello-vanilla.ru`. Correct value: `BW_DOMAIN=panda.hello-vanilla.ru`.
+3. **`BW_DOMAIN` expects bare hostname, not full HTTPS URL.** The entrypoint prepends `https://` itself: `VAULT_SERVICE_URI=https://${BW_DOMAIN:-localhost}` (entrypoint.sh line 12). Setting `BW_DOMAIN=https://panda.hello-vanilla.ru` would result in `https://https://panda.hello-vanilla.ru`. Correct value: `BW_DOMAIN=panda.hello-vanilla.ru`. Note: the spec's own Section 4.1 `.env.example` already uses `DOMAIN=panda.hello-vanilla.ru` (bare hostname — correct). However, the plan file `docs/superpowers/plans/2026-05-02-bitwarden-vps-setup.md` Task 2 (around line 118) and Task 7 (around line 587) both assume `BW_DOMAIN=https://...` and strip the scheme with shell parameter expansion. Those plan sections contradict the verified upstream behaviour and must be updated before the implementer runs Task 7's `install.sh`.
 
 4. **`BW_ENABLE_MAIL=false` does not exist.** There is no such variable. Mail is disabled by simply not setting any `globalSettings__mail__smtp__*` variables.
 
-5. **Tag `:beta` confirmed valid.** The `bitwarden/self-host` image on Docker Hub uses `:beta` as the recommended production tag (`:latest` does not exist). Image source is `ghcr.io/bitwarden/self-host` (GitHub Container Registry), mirrored to Docker Hub.
+### Confirmations
+
+5. **Tag `:beta` confirmed valid.** The `bitwarden/self-host` image on Docker Hub uses `:beta` as the recommended production tag (`:latest` does not exist). The image is built from the `bitwarden/self-host` GitHub repository and published to Docker Hub as `bitwarden/self-host`.
 
 ### 11.3 Volume mount and data layout (confirmed)
 
-The volume `bitwarden_data` must be mounted to `/etc/bitwarden` inside the container. Confirmed directory layout under that mount:
+The volume `bitwarden_data` must be mounted to `/etc/bitwarden` inside the container. Confirmed directory layout under that mount (from Dockerfile `RUN mkdir -p` at line 76–89 and ENV directives at lines 55–59):
 
 ```
 /etc/bitwarden/
 ├── vault.db              # SQLite database (BW_DB_FILE default)
-├── identity.pfx          # Identity server certificate (auto-generated on first run)
-├── attachments/
-│   └── send/
+├── identity.pfx          # Identity server certificate (auto-generated on first run by
+│                         #   entrypoint.sh lines 41–61 if the file is absent)
+├── attachments/          # user attachment blobs (top-level files stored here)
+│   └── send/             # Bitwarden Send payloads (subdirectory of attachments/)
 ├── data-protection/      # ASP.NET data protection keys
 ├── licenses/
 └── logs/
 ```
+
+Note: user-uploaded attachment files are stored directly inside `attachments/` at the top level; `send/` is a sibling subdirectory within `attachments/` holding only Bitwarden Send payloads, not general attachments.
 
 ---
 
