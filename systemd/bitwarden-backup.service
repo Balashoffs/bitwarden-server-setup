@@ -1,0 +1,10 @@
+[Unit]
+Description=Bitwarden daily backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=__BACKUP_SCRIPT__
+StandardOutput=append:/var/log/bitwarden-backup.log
+StandardError=append:/var/log/bitwarden-backup.log
