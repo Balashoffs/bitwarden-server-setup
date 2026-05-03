@@ -37,3 +37,14 @@ In particular:
 - Section 6 — full runbook
 - Section 7 — smoke checklist after install
 - Section 8 — known risks
+
+## Scripts reference
+
+| Script | Purpose | Idempotent? |
+|---|---|---|
+| `scripts/bootstrap.sh [--configure-ufw]` | Install Docker, certbot, swap on Ubuntu 22.04 VPS | Yes |
+| `scripts/install.sh` | Pull image, start container, configure nginx vhost + Let's Encrypt cert, install backup timer | Yes |
+| `scripts/lockdown.sh` | Disable user registration after owner is created | Yes |
+| `scripts/backup.sh` | Daily encrypted backup; run by systemd timer at 03:30 | Yes |
+| `scripts/restore.sh <archive> --yes-i-know` | Restore from encrypted backup archive | DESTRUCTIVE |
+| `scripts/update.sh` | Pull current `:beta` and recreate; saves rollback digest | Yes |
