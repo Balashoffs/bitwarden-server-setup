@@ -3,7 +3,7 @@
 **Дата:** 2026-05-02
 **Статус:** утверждён в брейншторме, готов к плану реализации
 **Целевой репозиторий:** `bitwarden-server-setup` (этот репо)
-**Источник продукта:** официальный self-host от Bitwarden — https://github.com/bitwarden/server (через unified Docker-образ `bitwarden/self-host`)
+**Источник продукта:** официальный self-host от Bitwarden — https://github.com/bitwarden/self-host (lite/unified Docker-образ `ghcr.io/bitwarden/lite`)
 
 ---
 
@@ -20,7 +20,7 @@
 | Что уже на VPS | nginx на 80/443, сайты на 8080/8081/22300 | Встраиваемся в существующий nginx, не ставим второй reverse proxy |
 | Домен | `panda.hello-vanilla.ru` | Указан пользователем |
 | TLS | Let's Encrypt через существующий certbot | Стандартный путь для nginx |
-| Метод деплоя | Bitwarden unified Docker-образ (`bitwarden/self-host:beta`) | Лёгкий (~350 MB RAM), один контейнер, рекомендован Bitwarden для self-host малого масштаба. Альтернативу `bitwarden.sh` (MSSQL + ~9 контейнеров) отклонили — не помещается в 2 GB RAM. |
+| Метод деплоя | Bitwarden lite Docker-образ (`ghcr.io/bitwarden/lite:beta`) | Лёгкий (~350 MB RAM), один контейнер, рекомендован Bitwarden для self-host малого масштаба. Альтернативу `bitwarden.sh` (MSSQL + ~9 контейнеров) отклонили — не помещается в 2 GB RAM. |
 | База данных | SQLite (файл в volume) | Достаточно для 1 пользователя, отсутствует отдельный контейнер БД |
 | Email / SMTP | Отключён | Пользователь не хочет настраивать. Регистрация без email-верификации, после регистрации блокируется. 2FA через TOTP. |
 | Бэкапы | Локально на VPS, ежедневно, ротация 7 дней, шифрование openssl | Минимальный уровень, защищает от случайного удаления, не от смерти VPS |
@@ -43,7 +43,7 @@ Internet → :80/:443 → существующий nginx
 
 | Контейнер | Образ | Назначение | RAM (примерно) |
 |---|---|---|---|
-| `bitwarden` | `bitwarden/self-host:beta` | api + identity + admin + web vault + notifications | ~350 MB |
+| `bitwarden` | `ghcr.io/bitwarden/lite:beta` | api + identity + admin + web vault + notifications | ~350 MB |
 
 (Caddy/Traefik не используем — reverse proxy один и тот же, существующий nginx.)
 
@@ -115,7 +115,7 @@ BW_DISABLE_USER_REGISTRATION=false
 ```yaml
 services:
   bitwarden:
-    image: bitwarden/self-host:beta
+    image: ghcr.io/bitwarden/lite:beta
     container_name: bitwarden
     restart: unless-stopped
     ports:
@@ -268,7 +268,7 @@ server {
 
 ### 5.6 `scripts/update.sh` — обновление
 
-1. Запомнить текущий digest: `docker inspect --format '{{index .RepoDigests 0}}' bitwarden/self-host:beta > .last_known_good_digest`.
+1. Запомнить текущий digest: `docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/bitwarden/lite:beta > .last_known_good_digest`.
 2. `docker compose pull`.
 3. `docker compose up -d`, ждать healthcheck.
 4. `docker image prune -f`.
@@ -436,7 +436,7 @@ sudo ./scripts/restore.sh /tmp/2026-04-30-0330.tar.gz.enc --yes-i-know
 1. **Бэкапы только локальные.** При гибели VPS (диск, провайдер исчез, ransomware) — данные пропадут безвозвратно. Принято осознанно. Если позже передумать — добавить в `backup.sh` второй шаг с `rclone copy` в S3-совместимое хранилище (~20 строк скрипта).
 2. **Пароль шифрования бэкапов лежит на том же VPS** (`/root/.bitwarden-backup-pass`). Защищает от утечки архивов, но не от компрометации root. Альтернатива (если позже захочется): GPG-шифрование публичным ключом, приватный ключ только на ноутбуке.
 3. **Пик нагрузки = OOM-риск.** 2 GB RAM делятся между Bitwarden + nginx + существующими сайтами. Swap 2 GB смягчает, но не устраняет. Мониторить `docker stats` периодически.
-4. **Tag `:beta` подвижен.** `bitwarden/self-host:beta` — moving tag, новый pull может принести другую версию. Снижение риска: после первого `docker compose up -d` зафиксировать digest (`docker inspect ... | grep RepoDigests`) и закрепить в `docker-compose.yml` как `image: bitwarden/self-host@sha256:...`. Делать вручную при стабилизации.
+4. **Tag `:beta` подвижен.** `ghcr.io/bitwarden/lite:beta` — moving tag, новый pull может принести другую версию. Снижение риска: после первого `docker compose up -d` зафиксировать digest (`docker inspect ... | grep RepoDigests`) и закрепить в `docker-compose.yml` как `image: ghcr.io/bitwarden/lite@sha256:...`. Делать вручную при стабилизации.
 5. **Нет fail2ban.** Защита от перебора — только rate-limit Bitwarden + (опционально) `limit_req` в nginx vhost. Достаточно для одного публично известного юзера; при подозрении на атаки — поставить fail2ban руками.
 6. **Master password recovery невозможен.** Это особенность модели Bitwarden — мастер-пароль = ключ шифрования. Принято осознанно; смягчение — записать офлайн на бумаге.
 7. **Watchtower не используется** — обновления вручную. Если обновлять забывают — копится security-долг. Смягчение: календарное напоминание раз в месяц.
@@ -461,7 +461,7 @@ sudo ./scripts/restore.sh /tmp/2026-04-30-0330.tar.gz.enc --yes-i-know
 - Точный текст vhost'а с `limit_req_zone` для login-эндпоинта — выбрать ли защиту через nginx или оставить на Bitwarden.
 - Какой пользователь VPS будет владеть репо и запускать `docker compose` (любой sudo-юзер подойдёт; в плане зафиксируем имя).
 - Куда положить лог `/var/log/bitwarden-backup.log` — `logrotate` нужен или `journalctl` достаточно (через `StandardOutput=journal`).
-- **Сверить с актуальной документацией unified-образа `bitwarden/self-host`** перед написанием compose-файла:
+- **Сверить с актуальной документацией lite-образа `ghcr.io/bitwarden/lite`** перед написанием compose-файла:
   - Точное имя env-переменной для отключения регистрации (`globalSettings__disableUserRegistration` vs `BW_ENABLE_USER_REGISTRATION` — у unified-образа могут быть свои короткие алиасы).
   - Точные имена `BW_DOMAIN`, `BW_DB_PROVIDER` (vs `globalSettings__*`).
   - Точный путь к SQLite-файлу внутри контейнера (предполагаем `/etc/bitwarden/data/db.sqlite`).
@@ -512,7 +512,7 @@ The following items in the existing spec (sections 4.1, 4.2, and 5.3) use incorr
 
 ### Confirmations
 
-5. **Tag `:beta` confirmed valid.** The `bitwarden/self-host` image on Docker Hub uses `:beta` as the recommended production tag (`:latest` does not exist). The image is built from the `bitwarden/self-host` GitHub repository and published to Docker Hub as `bitwarden/self-host`.
+5. **Image registry/name corrected: `ghcr.io/bitwarden/lite:beta`.** The image is published to GitHub Container Registry (GHCR), NOT Docker Hub — there is no `bitwarden/self-host` repo on Docker Hub (`docker pull` returns "repository does not exist"). Verified by querying the GHCR public tag list (`https://ghcr.io/v2/bitwarden/lite/tags/list` after fetching an anonymous bearer token from `https://ghcr.io/token?scope=repository:bitwarden/lite:pull`): the `:beta` tag exists alongside `:dev` and many sha256-digest tags. The `bitwarden/self-host` GitHub repo (still at https://github.com/bitwarden/self-host) is the correct *source* repository — its `bitwarden-lite/` subdirectory builds and publishes the `lite` package as confirmed by the Dockerfile labels `com.bitwarden.product="bitwarden"` / `com.bitwarden.project="lite"`. So source = `bitwarden/self-host` (GitHub), but artifact = `ghcr.io/bitwarden/lite:beta` (GHCR).
 
 ### 11.3 Volume mount and data layout (confirmed)
 

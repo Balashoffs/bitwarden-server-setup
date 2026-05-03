@@ -4,9 +4,9 @@
 
 **Goal:** Build a complete repository of configuration and scripts that lets a sudo-user clone, run two commands, and have a working self-hosted Bitwarden at `https://panda.hello-vanilla.ru` — including daily encrypted backups, restore procedure, and full runbook.
 
-**Architecture:** A single `bitwarden/self-host` Docker container bound to `127.0.0.1:8082`, fronted by the host's existing nginx via a new vhost, TLS via the host's existing certbot. SQLite database in a Docker volume. Daily backup driven by a systemd timer encrypts an archive of the volume. No SMTP, single-user lockdown after registration.
+**Architecture:** A single `ghcr.io/bitwarden/lite` Docker container bound to `127.0.0.1:8082`, fronted by the host's existing nginx via a new vhost, TLS via the host's existing certbot. SQLite database in a Docker volume. Daily backup driven by a systemd timer encrypts an archive of the volume. No SMTP, single-user lockdown after registration.
 
-**Tech Stack:** Bash 5+, Docker Engine + Compose plugin, nginx, certbot/Let's Encrypt, systemd, SQLite (inside container), openssl (AES-256-CBC for backups), shellcheck (script linter), Bitwarden unified image `bitwarden/self-host:beta`.
+**Tech Stack:** Bash 5+, Docker Engine + Compose plugin, nginx, certbot/Let's Encrypt, systemd, SQLite (inside container), openssl (AES-256-CBC for backups), shellcheck (script linter), Bitwarden lite image `ghcr.io/bitwarden/lite:beta`.
 
 **Source of truth for product behavior:** spec at `docs/superpowers/specs/2026-05-02-bitwarden-vps-setup-design.md`.
 
@@ -43,7 +43,7 @@
 
 ## Task 1: Verify unified-image env-variable names against official docs
 
-**Why this is first:** Spec section 10 leaves the exact env-var names of `bitwarden/self-host` as an open item. Every downstream task (compose, scripts) depends on them. Lock them in before writing any other file.
+**Why this is first:** Spec section 10 leaves the exact env-var names of the unified image as an open item. Every downstream task (compose, scripts) depends on them. Lock them in before writing any other file. (Note: the image is published as `ghcr.io/bitwarden/lite:beta` on GitHub Container Registry; the GitHub *source* repo is at `bitwarden/self-host`, but the Docker Hub repo of that name does NOT exist — see spec section 11.5 for the corrected registry/image mapping.)
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-05-02-bitwarden-vps-setup-design.md` — append a new "Section 11: Verified env-var names" with confirmed values.
@@ -122,7 +122,7 @@ BW_DISABLE_REGISTRATION=false
 ```
 
 These names are locked in spec section 11 (verified env-var names from the
-upstream `bitwarden/self-host` image). Use them verbatim.
+upstream `ghcr.io/bitwarden/lite` image). Use them verbatim.
 
 - [ ] **Step 2: Verify `.gitignore` contents**
 
@@ -211,7 +211,7 @@ git commit -m "Add project skeleton: README, .env.example, .gitignore"
 ```yaml
 services:
   bitwarden:
-    image: bitwarden/self-host:beta
+    image: ghcr.io/bitwarden/lite:beta
     container_name: bitwarden
     restart: unless-stopped
     ports:
@@ -1081,7 +1081,7 @@ require_repo_root
 DIGEST_FILE="$REPO_ROOT/.last_known_good_digest"
 
 # Capture current digest before pulling
-CURRENT="$(docker inspect --format '{{index .RepoDigests 0}}' bitwarden/self-host:beta 2>/dev/null || true)"
+CURRENT="$(docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/bitwarden/lite:beta 2>/dev/null || true)"
 if [ -n "$CURRENT" ]; then
   echo "$CURRENT" > "$DIGEST_FILE"
   log "Saved current digest to $DIGEST_FILE: $CURRENT"
@@ -1104,7 +1104,7 @@ done
 log "Pruning dangling images"
 docker image prune -f >/dev/null
 
-NEW="$(docker inspect --format '{{index .RepoDigests 0}}' bitwarden/self-host:beta 2>/dev/null || echo unknown)"
+NEW="$(docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/bitwarden/lite:beta 2>/dev/null || echo unknown)"
 log "Update complete; running $NEW"
 log "To roll back: edit docker-compose.yml to use image: $CURRENT and 'docker compose up -d'"
 ```

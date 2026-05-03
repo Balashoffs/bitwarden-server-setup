@@ -11,7 +11,7 @@ require_repo_root
 DIGEST_FILE="$REPO_ROOT/.last_known_good_digest"
 
 # Capture current digest before pulling
-CURRENT="$(docker inspect --format '{{index .RepoDigests 0}}' bitwarden/self-host:beta 2>/dev/null || true)"
+CURRENT="$(docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/bitwarden/lite:beta 2>/dev/null || true)"
 if [ -n "$CURRENT" ]; then
   echo "$CURRENT" > "$DIGEST_FILE"
   log "Saved current digest to $DIGEST_FILE: $CURRENT"
@@ -34,6 +34,6 @@ done
 log "Pruning dangling images"
 docker image prune -f >/dev/null
 
-NEW="$(docker inspect --format '{{index .RepoDigests 0}}' bitwarden/self-host:beta 2>/dev/null || echo unknown)"
+NEW="$(docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/bitwarden/lite:beta 2>/dev/null || echo unknown)"
 log "Update complete; running $NEW"
 log "To roll back: edit docker-compose.yml to use image: $CURRENT and 'docker compose up -d'"

@@ -1,6 +1,6 @@
 services:
   bitwarden:
-    image: bitwarden/self-host:beta
+    image: ghcr.io/bitwarden/lite:beta
     container_name: bitwarden
     restart: unless-stopped
     ports:
