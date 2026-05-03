@@ -1,6 +1,6 @@
 services:
   bitwarden:
-    image: ghcr.io/bitwarden/lite:beta
+    image: ghcr.io/bitwarden/lite:2026.4.0
     container_name: bitwarden
     restart: unless-stopped
     ports:
@@ -14,6 +14,7 @@ services:
       globalSettings__installation__key: ${BW_INSTALLATION_KEY}
     volumes:
       - bitwarden_data:/etc/bitwarden
+      - bitwarden_logs:/var/log/bitwarden
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/alive"]
       interval: 30s
@@ -23,3 +24,4 @@ services:
 
 volumes:
   bitwarden_data:
+  bitwarden_logs:

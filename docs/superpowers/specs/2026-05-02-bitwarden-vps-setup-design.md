@@ -436,7 +436,7 @@ sudo ./scripts/restore.sh /tmp/2026-04-30-0330.tar.gz.enc --yes-i-know
 1. **Бэкапы только локальные.** При гибели VPS (диск, провайдер исчез, ransomware) — данные пропадут безвозвратно. Принято осознанно. Если позже передумать — добавить в `backup.sh` второй шаг с `rclone copy` в S3-совместимое хранилище (~20 строк скрипта).
 2. **Пароль шифрования бэкапов лежит на том же VPS** (`/root/.bitwarden-backup-pass`). Защищает от утечки архивов, но не от компрометации root. Альтернатива (если позже захочется): GPG-шифрование публичным ключом, приватный ключ только на ноутбуке.
 3. **Пик нагрузки = OOM-риск.** 2 GB RAM делятся между Bitwarden + nginx + существующими сайтами. Swap 2 GB смягчает, но не устраняет. Мониторить `docker stats` периодически.
-4. **Tag `:beta` подвижен.** `ghcr.io/bitwarden/lite:beta` — moving tag, новый pull может принести другую версию. Снижение риска: после первого `docker compose up -d` зафиксировать digest (`docker inspect ... | grep RepoDigests`) и закрепить в `docker-compose.yml` как `image: ghcr.io/bitwarden/lite@sha256:...`. Делать вручную при стабилизации.
+4. **Версия зафиксирована, но не по digest.** В `docker-compose.yml` стоит `image: ghcr.io/bitwarden/lite:2026.4.0` — это calendar-version тег, который у Bitwarden иммутабелен (версия 2026.4.0 после релиза не перезаписывается). Тем не менее upstream может тихо «передвинуть» его в крайних случаях (security-rebuild, исправление ошибки сборки). Для полного pinning'а — после первого `docker compose up -d` снять digest (`docker inspect ... | grep RepoDigests`) и закрепить в `docker-compose.yml` как `image: ghcr.io/bitwarden/lite@sha256:...`. Делать вручную при стабилизации.
 5. **Нет fail2ban.** Защита от перебора — только rate-limit Bitwarden + (опционально) `limit_req` в nginx vhost. Достаточно для одного публично известного юзера; при подозрении на атаки — поставить fail2ban руками.
 6. **Master password recovery невозможен.** Это особенность модели Bitwarden — мастер-пароль = ключ шифрования. Принято осознанно; смягчение — записать офлайн на бумаге.
 7. **Watchtower не используется** — обновления вручную. Если обновлять забывают — копится security-долг. Смягчение: календарное напоминание раз в месяц.
@@ -512,11 +512,16 @@ The following items in the existing spec (sections 4.1, 4.2, and 5.3) use incorr
 
 ### Confirmations
 
-5. **Image registry/name corrected: `ghcr.io/bitwarden/lite:beta`.** The image is published to GitHub Container Registry (GHCR), NOT Docker Hub — there is no `bitwarden/self-host` repo on Docker Hub (`docker pull` returns "repository does not exist"). Verified by querying the GHCR public tag list (`https://ghcr.io/v2/bitwarden/lite/tags/list` after fetching an anonymous bearer token from `https://ghcr.io/token?scope=repository:bitwarden/lite:pull`): the `:beta` tag exists alongside `:dev` and many sha256-digest tags. The `bitwarden/self-host` GitHub repo (still at https://github.com/bitwarden/self-host) is the correct *source* repository — its `bitwarden-lite/` subdirectory builds and publishes the `lite` package as confirmed by the Dockerfile labels `com.bitwarden.product="bitwarden"` / `com.bitwarden.project="lite"`. So source = `bitwarden/self-host` (GitHub), but artifact = `ghcr.io/bitwarden/lite:beta` (GHCR).
+5. **Image registry/name corrected: `ghcr.io/bitwarden/lite:2026.4.0`.** The image is published to GitHub Container Registry (GHCR), NOT Docker Hub — there is no `bitwarden/self-host` repo on Docker Hub (`docker pull` returns "repository does not exist"). Verified by querying the GHCR public tag list (`https://ghcr.io/v2/bitwarden/lite/tags/list` after fetching an anonymous bearer token from `https://ghcr.io/token?scope=repository:bitwarden/lite:pull`). Available tags include: `:2026.4.0` (current pinned version per `version.json`), `:latest` (moving stable), `:beta` (moving preview), `:dev` (moving bleeding-edge), and many `sha256-…` digest tags. We pin to `:2026.4.0` to match the upstream `bitwarden-lite/docker-compose.yml` default (`image: ${REGISTRY:-ghcr.io/bitwarden}/lite:${TAG:-2026.4.0}`); this also makes `update.sh` a deliberate user action — bumping the tag in compose first, then running the script — rather than an implicit grab of whatever moved on `:beta` overnight. The `bitwarden/self-host` GitHub repo (still at https://github.com/bitwarden/self-host) is the correct *source* repository — its `bitwarden-lite/` subdirectory builds and publishes the `lite` package as confirmed by the Dockerfile labels `com.bitwarden.product="bitwarden"` / `com.bitwarden.project="lite"`. So source = `bitwarden/self-host` (GitHub), but artifact = `ghcr.io/bitwarden/lite:2026.4.0` (GHCR).
 
 ### 11.3 Volume mount and data layout (confirmed)
 
-The volume `bitwarden_data` must be mounted to `/etc/bitwarden` inside the container. Confirmed directory layout under that mount (from Dockerfile `RUN mkdir -p` at line 76–89 and ENV directives at lines 55–59):
+Two volumes are mounted, matching the upstream `bitwarden-lite/docker-compose.yml` reference:
+
+- `bitwarden_data:/etc/bitwarden` — persistent application data (the only volume `backup.sh` snapshots).
+- `bitwarden_logs:/var/log/bitwarden` — internal service logs from the unified container's supervisord-managed processes; deliberately excluded from backups since these are noisy and not recoverable state. Mounting them on a named volume keeps them around across `docker compose down`/`up` cycles for debugging.
+
+Confirmed directory layout under `/etc/bitwarden` (from Dockerfile `RUN mkdir -p` at line 76–89 and ENV directives at lines 55–59):
 
 ```
 /etc/bitwarden/
@@ -530,7 +535,7 @@ The volume `bitwarden_data` must be mounted to `/etc/bitwarden` inside the conta
 └── logs/
 ```
 
-Note: user-uploaded attachment files are stored directly inside `attachments/` at the top level; `send/` is a sibling subdirectory within `attachments/` holding only Bitwarden Send payloads, not general attachments.
+Note: user-uploaded attachment files are stored directly inside `attachments/` at the top level; `send/` is a sibling subdirectory within `attachments/` holding only Bitwarden Send payloads, not general attachments. The `logs/` subdirectory under `/etc/bitwarden/` is unused at runtime — actual logs go to `/var/log/bitwarden/` via the separate `bitwarden_logs` volume above.
 
 ---
 
