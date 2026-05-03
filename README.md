@@ -4,7 +4,7 @@ Self-hosted Bitwarden on a 2 GB Ubuntu 22.04 VPS, integrated with an existing ng
 
 ## Quick start
 
-1. Add DNS A-record `panda.hello-vanilla.ru → <VPS_IP>`.
+1. Add DNS A-record `example.com → <VPS_IP>`.
 2. Get installation ID + key from https://bitwarden.com/host/.
 3. SSH to the VPS, then:
 
@@ -21,7 +21,7 @@ Self-hosted Bitwarden on a 2 GB Ubuntu 22.04 VPS, integrated with an existing ng
    sudo ./scripts/install.sh
    ```
 
-4. Open `https://panda.hello-vanilla.ru`, register the single owner account.
+4. Open `https://example.com`, register the single owner account.
 5. **Write the master password down on paper.** It cannot be reset.
 6. Run `sudo ./scripts/lockdown.sh` to disable further registrations.
 7. Enable TOTP 2FA in account settings; save the recovery code offline.
