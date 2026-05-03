@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a complete repository of configuration and scripts that lets a sudo-user clone, run two commands, and have a working self-hosted Bitwarden at `https://panda.hello-vanilla.ru` — including daily encrypted backups, restore procedure, and full runbook.
+**Goal:** Build a complete repository of configuration and scripts that lets a sudo-user clone, run two commands, and have a working self-hosted Bitwarden at `https://example.com` — including daily encrypted backups, restore procedure, and full runbook.
 
 **Architecture:** A single `ghcr.io/bitwarden/lite` Docker container bound to `127.0.0.1:8082`, fronted by the host's existing nginx via a new vhost, TLS via the host's existing certbot. SQLite database in a Docker volume. Daily backup driven by a systemd timer encrypts an archive of the volume. No SMTP, single-user lockdown after registration.
 
@@ -20,7 +20,7 @@
 | `.gitignore` | Already present; extend if needed |
 | `.env.example` | Runtime config template (committed) |
 | `docker-compose.yml` | Single `bitwarden` service definition |
-| `nginx/panda.hello-vanilla.ru.conf.template` | nginx vhost template with `__DOMAIN__`/`__BIND_PORT__` placeholders |
+| `nginx/example.com.conf.template` | nginx vhost template with `__DOMAIN__`/`__BIND_PORT__` placeholders |
 | `scripts/_lib.sh` | Shared bash helpers (`log`, `die`, `require_cmd`, `require_root`, `load_env`) sourced by all scripts |
 | `scripts/bootstrap.sh` | Idempotent VPS prep: docker, certbot, swap |
 | `scripts/install.sh` | Idempotent install: pull image, up containers, render & enable nginx vhost, certbot, install systemd units |
@@ -61,7 +61,7 @@ Confirm the **exact** name and form for each of these. The unified image is know
 
 | Function | Env var (verified) |
 |---|---|
-| Domain (full HTTPS URL) | `BW_DOMAIN` (expected: `https://panda.hello-vanilla.ru`) |
+| Domain (full HTTPS URL) | `BW_DOMAIN` (expected: `https://example.com`) |
 | Disable signups | `globalSettings__disableUserRegistration` or short `BW_ENABLE_USER_REGISTRATION` (inverted) |
 | Database provider | `BW_DB_PROVIDER` (`sqlite` / `postgresql` / `mysql` / `sqlserver`) |
 | SQLite file path inside container | (defaults under `/etc/bitwarden/...`; record precise path) |
@@ -98,7 +98,7 @@ Use the names confirmed in Task 1 Step 2. The skeleton from the spec is:
 ```env
 # Domain — BARE hostname (no scheme). The unified image's entrypoint
 # prepends https:// itself; passing a URL would yield "https://https://..." links.
-BW_DOMAIN=panda.hello-vanilla.ru
+BW_DOMAIN=example.com
 
 # Email used by certbot for Let's Encrypt account/recovery
 ADMIN_EMAIL=you@example.tld
@@ -149,7 +149,7 @@ Self-hosted Bitwarden on a 2 GB Ubuntu 22.04 VPS, integrated with an existing ng
 
 ## Quick start
 
-1. Add DNS A-record `panda.hello-vanilla.ru → <VPS_IP>`.
+1. Add DNS A-record `example.com → <VPS_IP>`.
 2. Get installation ID + key from https://bitwarden.com/host/.
 3. SSH to the VPS, then:
 
@@ -166,7 +166,7 @@ Self-hosted Bitwarden on a 2 GB Ubuntu 22.04 VPS, integrated with an existing ng
    sudo ./scripts/install.sh
    ```
 
-4. Open `https://panda.hello-vanilla.ru`, register the single owner account.
+4. Open `https://example.com`, register the single owner account.
 5. **Write the master password down on paper.** It cannot be reset.
 6. Run `sudo ./scripts/lockdown.sh` to disable further registrations.
 7. Enable TOTP 2FA in account settings; save the recovery code offline.
@@ -258,12 +258,12 @@ git commit -m "Add docker-compose.yml for unified bitwarden image"
 ## Task 4: Create nginx vhost template
 
 **Files:**
-- Create: `nginx/panda.hello-vanilla.ru.conf.template`
+- Create: `nginx/example.com.conf.template`
 
 - [ ] **Step 1: Write the template**
 
 ```nginx
-# Generated from nginx/panda.hello-vanilla.ru.conf.template by scripts/install.sh.
+# Generated from nginx/example.com.conf.template by scripts/install.sh.
 # Placeholders __DOMAIN__ and __BIND_PORT__ are substituted at install time.
 # certbot --nginx will append HTTPS server block + 80→443 redirect on first run.
 
@@ -294,21 +294,21 @@ server {
 - [ ] **Step 2: Render-test the template**
 
 ```bash
-sed -e 's/__DOMAIN__/panda.hello-vanilla.ru/g' \
+sed -e 's/__DOMAIN__/example.com/g' \
     -e 's/__BIND_PORT__/8082/g' \
-    nginx/panda.hello-vanilla.ru.conf.template
+    nginx/example.com.conf.template
 ```
-Expected: prints the nginx config with `panda.hello-vanilla.ru` and `8082` substituted; no `__*__` placeholders remain. Verify with:
+Expected: prints the nginx config with `example.com` and `8082` substituted; no `__*__` placeholders remain. Verify with:
 ```bash
-sed -e 's/__DOMAIN__/panda.hello-vanilla.ru/g' -e 's/__BIND_PORT__/8082/g' \
-    nginx/panda.hello-vanilla.ru.conf.template | grep -c '__' 
+sed -e 's/__DOMAIN__/example.com/g' -e 's/__BIND_PORT__/8082/g' \
+    nginx/example.com.conf.template | grep -c '__' 
 ```
 Expected output: `0`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add nginx/panda.hello-vanilla.ru.conf.template
+git add nginx/example.com.conf.template
 git commit -m "Add nginx vhost template for Bitwarden"
 ```
 
@@ -1178,7 +1178,7 @@ git commit -m "README: add scripts reference table"
 
 ## Task 13: Real VPS smoke test (manual)
 
-**Why this is a task:** scripts that touch a real system can only be fully verified there. This task is the runbook walkthrough; the operator follows it on the actual `panda.hello-vanilla.ru` VPS and reports back.
+**Why this is a task:** scripts that touch a real system can only be fully verified there. This task is the runbook walkthrough; the operator follows it on the actual `example.com` VPS and reports back.
 
 **Files:** none (deployment-time validation)
 
@@ -1186,7 +1186,7 @@ git commit -m "README: add scripts reference table"
 
 Run on workstation:
 ```bash
-dig +short panda.hello-vanilla.ru
+dig +short example.com
 ```
 Expected: returns the VPS public IP. If empty — add the A-record at the registrar before continuing.
 
@@ -1221,7 +1221,7 @@ docker ps   # should work without sudo now
 ```bash
 cp .env.example .env
 nano .env
-# Fill: BW_DOMAIN=panda.hello-vanilla.ru        # bare hostname, no scheme
+# Fill: BW_DOMAIN=example.com        # bare hostname, no scheme
 #       ADMIN_EMAIL=<your email>
 #       BW_INSTALLATION_ID=<from step 2>
 #       BW_INSTALLATION_KEY=<from step 2>
@@ -1238,17 +1238,17 @@ Expected output ends with the "install.sh complete" banner. If it fails on the b
 
 Run each, all should pass:
 ```bash
-curl -fsS https://panda.hello-vanilla.ru/alive   # expect 200
+curl -fsS https://example.com/alive   # expect 200
 docker compose ps                                # bitwarden healthy
 sudo nginx -t                                    # syntax OK
-sudo certbot certificates                        # cert listed for panda.hello-vanilla.ru
+sudo certbot certificates                        # cert listed for example.com
 sudo systemctl is-active bitwarden-backup.timer  # active
 sudo systemctl list-timers bitwarden-backup.timer
 ```
 
 - [ ] **Step 8: Register owner & lockdown**
 
-In a browser: `https://panda.hello-vanilla.ru` → Create Account. **Write the master password down on paper before submitting.**
+In a browser: `https://example.com` → Create Account. **Write the master password down on paper before submitting.**
 
 Then:
 ```bash
@@ -1273,7 +1273,7 @@ ls -lh /var/backups/bitwarden/
 
 - [ ] **Step 11: Verify clients**
 
-Install Bitwarden mobile app and browser extension. In each, set Server URL = `https://panda.hello-vanilla.ru`. Log in. Add a test item; confirm it syncs to the other client.
+Install Bitwarden mobile app and browser extension. In each, set Server URL = `https://example.com`. Log in. Add a test item; confirm it syncs to the other client.
 
 - [ ] **Step 12: Restore drill (optional but strongly recommended)**
 

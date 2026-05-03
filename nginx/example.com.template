@@ -1,4 +1,4 @@
-# Generated from nginx/panda.hello-vanilla.ru.conf.template by scripts/install.sh.
+# Generated from nginx/example.com.conf.template by scripts/install.sh.
 # Placeholders __DOMAIN__ and __BIND_PORT__ are substituted at install time.
 # certbot --nginx will append HTTPS server block + 80→443 redirect on first run.
 
