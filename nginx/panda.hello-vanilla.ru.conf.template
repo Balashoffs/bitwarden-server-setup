@@ -1,0 +1,26 @@
+# Generated from nginx/panda.hello-vanilla.ru.conf.template by scripts/install.sh.
+# Placeholders __DOMAIN__ and __BIND_PORT__ are substituted at install time.
+# certbot --nginx will append HTTPS server block + 80→443 redirect on first run.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __DOMAIN__;
+
+    location / {
+        proxy_pass http://127.0.0.1:__BIND_PORT__;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket for notifications/SignalR
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 1d;
+    }
+
+    # 500 MB attachments + safety margin (Bitwarden default cap)
+    client_max_body_size 525M;
+}
