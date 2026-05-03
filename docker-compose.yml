@@ -1,0 +1,25 @@
+services:
+  bitwarden:
+    image: bitwarden/self-host:beta
+    container_name: bitwarden
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${BW_BIND_PORT}:8080"
+    env_file: .env
+    environment:
+      BW_DOMAIN: ${BW_DOMAIN}
+      BW_DB_PROVIDER: ${BW_DB_PROVIDER}
+      globalSettings__disableUserRegistration: ${BW_DISABLE_REGISTRATION}
+      globalSettings__installation__id: ${BW_INSTALLATION_ID}
+      globalSettings__installation__key: ${BW_INSTALLATION_KEY}
+    volumes:
+      - bitwarden_data:/etc/bitwarden
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/alive"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  bitwarden_data:
