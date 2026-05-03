@@ -24,7 +24,7 @@
 | `scripts/_lib.sh` | Shared bash helpers (`log`, `die`, `require_cmd`, `require_root`, `load_env`) sourced by all scripts |
 | `scripts/bootstrap.sh` | Idempotent VPS prep: docker, certbot, swap |
 | `scripts/install.sh` | Idempotent install: pull image, up containers, render & enable nginx vhost, certbot, install systemd units |
-| `scripts/lockdown.sh` | Set `BW_DISABLE_USER_REGISTRATION=true` and restart container |
+| `scripts/lockdown.sh` | Set `BW_DISABLE_REGISTRATION=true` and restart container |
 | `scripts/backup.sh` | SQLite atomic dump → tar volume → AES-256 encrypt → 7-day rotation |
 | `scripts/restore.sh` | Decrypt archive → wipe volume → unpack → restart; requires `--yes-i-know` |
 | `scripts/update.sh` | Save digest → pull → up → prune |
@@ -96,8 +96,9 @@ git commit -m "Lock down unified-image env-variable names in spec"
 Use the names confirmed in Task 1 Step 2. The skeleton from the spec is:
 
 ```env
-# Domain — full HTTPS URL (Bitwarden builds links from this)
-BW_DOMAIN=https://panda.hello-vanilla.ru
+# Domain — BARE hostname (no scheme). The unified image's entrypoint
+# prepends https:// itself; passing a URL would yield "https://https://..." links.
+BW_DOMAIN=panda.hello-vanilla.ru
 
 # Email used by certbot for Let's Encrypt account/recovery
 ADMIN_EMAIL=you@example.tld
@@ -114,11 +115,14 @@ BW_BIND_PORT=8082
 BW_DB_PROVIDER=sqlite
 
 # Registration — false at first start (so you can register the owner),
-# scripts/lockdown.sh flips this to true after.
-BW_DISABLE_USER_REGISTRATION=false
+# scripts/lockdown.sh flips this to true after. This .env variable is
+# passed through to the container as `globalSettings__disableUserRegistration`
+# (the unified image has NO short BW_* alias for this — see spec section 11).
+BW_DISABLE_REGISTRATION=false
 ```
 
-If Task 1 found that the disable-registration var has a different name, use that name and adjust the comment.
+These names are locked in spec section 11 (verified env-var names from the
+upstream `bitwarden/self-host` image). Use them verbatim.
 
 - [ ] **Step 2: Verify `.gitignore` contents**
 
@@ -216,7 +220,7 @@ services:
     environment:
       BW_DOMAIN: ${BW_DOMAIN}
       BW_DB_PROVIDER: ${BW_DB_PROVIDER}
-      globalSettings__disableUserRegistration: ${BW_DISABLE_USER_REGISTRATION}
+      globalSettings__disableUserRegistration: ${BW_DISABLE_REGISTRATION}
       globalSettings__installation__id: ${BW_INSTALLATION_ID}
       globalSettings__installation__key: ${BW_INSTALLATION_KEY}
     volumes:
@@ -232,7 +236,7 @@ volumes:
   bitwarden_data:
 ```
 
-If Task 1 found a different disable-signup variable name (e.g., `BW_ENABLE_USER_REGISTRATION` inverted), use that here and remove `globalSettings__disableUserRegistration`. **The single source of truth for this name is the table written in spec Section 11.**
+**Source of truth for env names:** spec Section 11. Per Section 11, the disable-registration variable has NO short `BW_*` alias — `globalSettings__disableUserRegistration` must be passed directly. The `.env` file uses the human-friendly name `BW_DISABLE_REGISTRATION` and the compose `environment:` block re-maps it.
 
 - [ ] **Step 2: Validate compose syntax**
 
@@ -583,10 +587,11 @@ require_cmd certbot
 require_cmd ss
 require_cmd sed
 
-# Extract bare hostname for certbot (BW_DOMAIN is a full URL)
-HOSTNAME="${BW_DOMAIN#https://}"
-HOSTNAME="${HOSTNAME#http://}"
-HOSTNAME="${HOSTNAME%/}"
+# BW_DOMAIN is the bare hostname (per spec section 11). Sanity-check no scheme leaked in.
+case "$BW_DOMAIN" in
+  http://*|https://*) die "BW_DOMAIN must be bare hostname, not URL: '$BW_DOMAIN' (see spec section 11)" ;;
+esac
+HOSTNAME="$BW_DOMAIN"
 
 [ -n "${BW_INSTALLATION_ID:-}" ] || die "BW_INSTALLATION_ID empty in .env"
 [ -n "${BW_INSTALLATION_KEY:-}" ] || die "BW_INSTALLATION_KEY empty in .env"
@@ -741,13 +746,13 @@ require_root "$@"
 require_repo_root
 load_env
 
-if grep -q '^BW_DISABLE_USER_REGISTRATION=true' .env; then
+if grep -q '^BW_DISABLE_REGISTRATION=true' .env; then
   log "Registration already disabled — nothing to do"
   exit 0
 fi
 
-log "Setting BW_DISABLE_USER_REGISTRATION=true in .env"
-sed -i 's/^BW_DISABLE_USER_REGISTRATION=.*/BW_DISABLE_USER_REGISTRATION=true/' .env
+log "Setting BW_DISABLE_REGISTRATION=true in .env"
+sed -i 's/^BW_DISABLE_REGISTRATION=.*/BW_DISABLE_REGISTRATION=true/' .env
 
 log "Recreating container with new env"
 docker compose up -d
@@ -760,9 +765,12 @@ for i in $(seq 1 60); do
   [ "$i" = 60 ] && die "container did not become healthy in 120 s"
 done
 
-# Probe registration endpoint — expect 4xx
-HOSTNAME="${BW_DOMAIN#https://}"
-HOSTNAME="${HOSTNAME%/}"
+# Probe registration endpoint — expect 4xx.
+# BW_DOMAIN is the bare hostname (per spec section 11); sanity-check no scheme leaked in.
+case "$BW_DOMAIN" in
+  http://*|https://*) die "BW_DOMAIN must be bare hostname, not URL: '$BW_DOMAIN' (see spec section 11)" ;;
+esac
+HOSTNAME="$BW_DOMAIN"
 code="$(curl -s -o /dev/null -w '%{http_code}' \
   -X POST "https://${HOSTNAME}/identity/accounts/register" \
   -H 'Content-Type: application/json' \
@@ -841,13 +849,13 @@ Path on this VPS: $PASS_FILE (chmod 600).
 EOF
 fi
 
-# 1. Atomic SQLite backup inside container (only if container is running)
+# 1. Atomic SQLite backup inside container (only if container is running).
+# Path /etc/bitwarden/vault.db is the BW_DB_FILE default (Dockerfile line 40,
+# verified in spec section 11.1).
 if docker ps --format '{{.Names}}' | grep -qx bitwarden; then
   log "Running SQLite atomic backup inside container"
-  # The actual SQLite path inside the unified image must match spec section 11.
-  # Adjust if Task 1 verified a different path.
   docker compose exec -T bitwarden \
-    sh -c 'sqlite3 /etc/bitwarden/data/db.sqlite ".backup /etc/bitwarden/data/db.sqlite.bak"' \
+    sh -c 'sqlite3 /etc/bitwarden/vault.db ".backup /etc/bitwarden/vault.db.bak"' \
     || die "sqlite backup failed inside container"
 else
   log "WARN: bitwarden container not running; volume snapshot will reflect on-disk state only"
@@ -874,7 +882,7 @@ rm -f "$RAW"
 
 # 4. Remove the in-container .bak (if it exists)
 if docker ps --format '{{.Names}}' | grep -qx bitwarden; then
-  docker compose exec -T bitwarden rm -f /etc/bitwarden/data/db.sqlite.bak || true
+  docker compose exec -T bitwarden rm -f /etc/bitwarden/vault.db.bak || true
 fi
 
 # 5. Rotate: delete .enc files older than RETENTION_DAYS
@@ -1016,7 +1024,7 @@ cat >&2 <<EOF
 ==== restore.sh complete ====
 
 Restored from: $ARCHIVE
-Open: ${BW_DOMAIN:-(see .env)}
+Open: https://${BW_DOMAIN:-<your-domain>}
 Login with the master password used when this backup was created.
 EOF
 ```
@@ -1213,7 +1221,7 @@ docker ps   # should work without sudo now
 ```bash
 cp .env.example .env
 nano .env
-# Fill: BW_DOMAIN=https://panda.hello-vanilla.ru
+# Fill: BW_DOMAIN=panda.hello-vanilla.ru        # bare hostname, no scheme
 #       ADMIN_EMAIL=<your email>
 #       BW_INSTALLATION_ID=<from step 2>
 #       BW_INSTALLATION_KEY=<from step 2>
@@ -1308,7 +1316,9 @@ If any step fails — see spec section 6.4 troubleshooting table.
 **Placeholder scan:** No "TBD/TODO" remain. Task 1 deliberately defers env-var lookup but supplies the URL + procedure. Task 12/13 are by design manual.
 
 **Type/name consistency:**
-- `BW_DOMAIN` is consistently a full URL (with `https://`) across `.env.example`, compose, scripts; scripts strip the scheme to get the bare hostname for nginx/certbot — checked install.sh, lockdown.sh, restore.sh.
+- `BW_DOMAIN` is consistently a **bare hostname** (no scheme, per spec section 11.2 #3) across `.env.example`, compose, and scripts. Scripts that need to construct URLs (install.sh, lockdown.sh) prepend `https://` themselves and validate via a `case` guard that no scheme leaked into the value — checked install.sh, lockdown.sh.
+- `BW_DISABLE_REGISTRATION` is the human-friendly `.env` name; the compose `environment:` block re-maps it to the upstream variable `globalSettings__disableUserRegistration` (no short `BW_*` alias exists — spec section 11.2 #1). lockdown.sh edits the `.env` variable then `docker compose up -d` propagates the new value.
+- SQLite path inside the container is `/etc/bitwarden/vault.db` (the `BW_DB_FILE` default — spec section 11.2 #2 and section 11.3). backup.sh references this exact path; no other path is hardcoded.
 - `BW_BIND_PORT` consistent everywhere.
 - `bitwarden_data` volume name consistent in compose, backup.sh, restore.sh.
 - `bitwarden` container name consistent.
