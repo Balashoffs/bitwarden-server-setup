@@ -9,6 +9,11 @@ services:
     environment:
       BW_DOMAIN: ${BW_DOMAIN}
       BW_DB_PROVIDER: ${BW_DB_PROVIDER}
+      BW_DB_SERVER: ${BW_DB_SERVER:-}
+      BW_DB_DATABASE: ${BW_DB_DATABASE:-}
+      BW_DB_USERNAME: ${BW_DB_USERNAME:-}
+      BW_DB_PASSWORD: ${BW_DB_PASSWORD:-}
+      BW_DB_PORT: ${BW_DB_PORT:-}
       globalSettings__disableUserRegistration: ${BW_DISABLE_REGISTRATION}
       globalSettings__installation__id: ${BW_INSTALLATION_ID}
       globalSettings__installation__key: ${BW_INSTALLATION_KEY}
@@ -21,7 +26,52 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      mysql:
+        condition: service_healthy
+        required: false
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: bitwarden-postgres
+    profiles: ["postgresql"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${BW_DB_DATABASE}
+      POSTGRES_USER: ${BW_DB_USERNAME}
+      POSTGRES_PASSWORD: ${BW_DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mysql:
+    image: mysql:8.0
+    container_name: bitwarden-mysql
+    profiles: ["mysql"]
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${BW_DB_DATABASE}
+      MYSQL_USER: ${BW_DB_USERNAME}
+      MYSQL_PASSWORD: ${BW_DB_PASSWORD}
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost",
+             "-u", "$${MYSQL_USER}", "-p$${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   bitwarden_data:
   bitwarden_logs:
+  postgres_data:
+  mysql_data:
