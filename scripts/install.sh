@@ -27,6 +27,17 @@ HOSTNAME="$BW_DOMAIN"
 [ -n "${ADMIN_EMAIL:-}" ] || die "ADMIN_EMAIL empty in .env"
 [ -n "${BW_BIND_PORT:-}" ] || die "BW_BIND_PORT empty in .env"
 
+# Resolve and validate DB provider; for non-sqlite modes the password is mandatory.
+PROVIDER="$(db_provider)"
+if [ "$PROVIDER" != "sqlite" ]; then
+  [ -n "${BW_DB_PASSWORD:-}" ] || die "BW_DB_PASSWORD must be set in .env for $PROVIDER mode"
+  [ -n "${BW_DB_USERNAME:-}" ] || die "BW_DB_USERNAME must be set in .env for $PROVIDER mode"
+  [ -n "${BW_DB_DATABASE:-}" ] || die "BW_DB_DATABASE must be set in .env for $PROVIDER mode"
+  [ -n "${BW_DB_SERVER:-}"   ] || die "BW_DB_SERVER must be set in .env for $PROVIDER mode"
+  [ -n "${BW_DB_PORT:-}"     ] || die "BW_DB_PORT must be set in .env for $PROVIDER mode"
+fi
+log "DB provider: $PROVIDER"
+
 # 1. Confirm bind port is free on 127.0.0.1 (excluding the existing bitwarden container itself).
 if ss -tlnp "( sport = :$BW_BIND_PORT )" 2>/dev/null | grep -q '127.0.0.1'; then
   if ! docker ps --format '{{.Names}}' | grep -qx bitwarden; then
@@ -37,11 +48,18 @@ else
   log "port $BW_BIND_PORT on 127.0.0.1 is free"
 fi
 
-# 2. Pull image and start container
+# 2. Pull image and start container(s)
+# Pass --profile only for non-sqlite modes so that `docker compose up -d` in
+# sqlite mode does not try to start a DB sidecar.
+COMPOSE_PROFILE_ARGS=()
+if [ "$PROVIDER" != "sqlite" ]; then
+  COMPOSE_PROFILE_ARGS=(--profile "$PROVIDER")
+fi
+
 log "Pulling image"
-docker compose pull
-log "Starting container"
-docker compose up -d
+docker compose "${COMPOSE_PROFILE_ARGS[@]}" pull
+log "Starting container(s)"
+docker compose "${COMPOSE_PROFILE_ARGS[@]}" up -d
 
 # 3. Wait for healthcheck
 log "Waiting for container to become healthy (up to 120 s)"
