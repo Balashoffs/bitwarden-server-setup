@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Daily encrypted backup of the bitwarden_data volume.
+# Daily encrypted backup of bitwarden_data + (for postgres/mysql) DB dump.
 # Run: sudo ./scripts/backup.sh
 # Invoked automatically by systemd timer bitwarden-backup.timer.
 
@@ -8,56 +8,64 @@ source "$(dirname "$0")/_lib.sh"
 
 require_root "$@"
 require_repo_root
+load_env
 
-BACKUP_DIR=/var/backups/bitwarden
-PASS_FILE=/root/.bitwarden-backup-pass
-RETENTION_DAYS=7
+PROVIDER="$(db_provider)"
 TS="$(date -u +%Y-%m-%d-%H%M)"
 
 mkdir -p "$BACKUP_DIR"
+ensure_pass_file
 
-# Generate password file on first run
-if [ ! -f "$PASS_FILE" ]; then
-  log "Generating new backup encryption password at $PASS_FILE"
-  head -c 64 /dev/urandom | base64 -w0 > "$PASS_FILE"
-  chmod 600 "$PASS_FILE"
-  cat >&2 <<EOF
+WORKDIR="$(mktemp -d)"
+trap 'rm -rf "$WORKDIR"' EXIT
 
-================================================================================
-NEW BACKUP PASSWORD GENERATED. SAVE THIS OFFLINE NOW (paper or external vault):
+RAW="$BACKUP_DIR/${TS}.tar.gz"
+ENC="${RAW}.enc"
 
-  $(cat "$PASS_FILE")
-
-Without this password, encrypted backups CANNOT be decrypted.
-Path on this VPS: $PASS_FILE (chmod 600).
-================================================================================
-
-EOF
-fi
-
-# 1. Atomic SQLite backup inside container (only if container is running).
-# Path /etc/bitwarden/vault.db is the BW_DB_FILE default (Dockerfile line 40,
-# verified in spec section 11.1).
-if docker ps --format '{{.Names}}' | grep -qx bitwarden; then
+# 1. SQLite atomic backup inside container (only if container is running and
+#    we are in sqlite mode). Spec section 11.1 of the predecessor design
+#    locks BW_DB_FILE = /etc/bitwarden/vault.db.
+if [ "$PROVIDER" = "sqlite" ] && docker ps --format '{{.Names}}' | grep -qx bitwarden; then
   log "Running SQLite atomic backup inside container"
   docker compose exec -T bitwarden \
     sh -c 'sqlite3 /etc/bitwarden/vault.db ".backup /etc/bitwarden/vault.db.bak"' \
-    || die "sqlite backup failed inside container"
-else
+    || die "sqlite atomic backup failed inside container"
+elif [ "$PROVIDER" = "sqlite" ]; then
   log "WARN: bitwarden container not running; volume snapshot will reflect on-disk state only"
 fi
 
-# 2. Tar the volume into BACKUP_DIR via a throw-away container
-RAW="$BACKUP_DIR/${TS}.tar.gz"
-log "Snapshotting volume to $RAW"
+# 2. Snapshot bitwarden_data volume (always — config, attachments, sends).
+log "Snapshotting bitwarden_data volume"
 docker run --rm \
   -v bitwarden_data:/src:ro \
-  -v "$BACKUP_DIR:/dst" \
-  alpine sh -c "tar czf /dst/${TS}.tar.gz -C /src ." \
-  || die "tar of volume failed"
+  -v "$WORKDIR:/dst" \
+  alpine tar czf /dst/bitwarden_data.tgz -C /src . \
+  || die "tar of bitwarden_data failed"
 
-# 3. Encrypt
-ENC="${RAW}.enc"
+# 3. DB dump for postgres/mysql.
+case "$PROVIDER" in
+  postgresql)
+    log "Running pg_dump"
+    docker compose exec -T postgres \
+      pg_dump -U "$BW_DB_USERNAME" "$BW_DB_DATABASE" \
+      | gzip > "$WORKDIR/dump.sql.gz" \
+      || die "pg_dump failed"
+    ;;
+  mysql)
+    log "Running mysqldump"
+    docker compose exec -T mysql \
+      mysqldump --single-transaction \
+        -u "$BW_DB_USERNAME" -p"$BW_DB_PASSWORD" "$BW_DB_DATABASE" \
+      | gzip > "$WORKDIR/dump.sql.gz" \
+      || die "mysqldump failed"
+    ;;
+esac
+
+# 4. PROVIDER manifest + bundle + encrypt.
+echo "$PROVIDER" > "$WORKDIR/PROVIDER"
+log "Bundling archive at $RAW"
+tar -C "$WORKDIR" -czf "$RAW" .
+
 log "Encrypting to $ENC"
 openssl enc -aes-256-cbc -pbkdf2 -iter 200000 \
   -in "$RAW" \
@@ -66,15 +74,15 @@ openssl enc -aes-256-cbc -pbkdf2 -iter 200000 \
   || die "encryption failed"
 rm -f "$RAW"
 
-# 4. Remove the in-container .bak (if it exists)
-if docker ps --format '{{.Names}}' | grep -qx bitwarden; then
+# 5. Clean up the in-container .bak file (sqlite mode).
+if [ "$PROVIDER" = "sqlite" ] && docker ps --format '{{.Names}}' | grep -qx bitwarden; then
   docker compose exec -T bitwarden rm -f /etc/bitwarden/vault.db.bak || true
 fi
 
-# 5. Rotate: delete .enc files older than RETENTION_DAYS
+# 6. Rotate.
 log "Pruning backups older than ${RETENTION_DAYS} days"
 find "$BACKUP_DIR" -maxdepth 1 -name '*.tar.gz.enc' -mtime "+$RETENTION_DAYS" -print -delete
 
-# 6. Summary
-SIZE_BYTES="$(stat -c%s "$ENC")"
-log "Backup ok: $ENC (${SIZE_BYTES} bytes)"
+# 7. Summary.
+SIZE_BYTES="$(stat -c%s "$ENC" 2>/dev/null || stat -f%z "$ENC")"
+log "Backup ok ($PROVIDER): $ENC (${SIZE_BYTES} bytes)"
